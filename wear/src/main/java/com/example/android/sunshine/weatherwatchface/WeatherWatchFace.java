@@ -21,14 +21,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.v4.content.ContextCompat;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
@@ -36,6 +39,9 @@ import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -87,7 +93,8 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
-        Paint mTextPaint;
+        Paint mTimePaint;
+        Paint mDatePaint;
         boolean mAmbient;
         Time mTime;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
@@ -97,7 +104,21 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                 mTime.setToNow();
             }
         };
+
+        static final String TIME_STRING = "00:00";
+        static final String DATE_STRING = "Sun, JUN 15 2016";
+
+
         int mTapCount;
+
+        Calendar mCalendar;
+        float mCenterXTimeOffset;
+        float mCenterYTimeOffset;
+
+        float mCenterXDateOffset;
+        float mCenterYDateOffset;
+
+        Bitmap mForecastBitmap;
 
         float mXOffset;
         float mYOffset;
@@ -122,12 +143,22 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
             mBackgroundPaint = new Paint();
-            mBackgroundPaint.setColor(resources.getColor(R.color.background));
+            mBackgroundPaint.setColor(ContextCompat.getColor(
+                    WeatherWatchFace.this, R.color.blue));
 
-            mTextPaint = new Paint();
-            mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mTimePaint = new Paint();
+            mTimePaint = createTextPaint(ContextCompat.getColor(
+                    WeatherWatchFace.this, R.color.digital_text));
+
+            mDatePaint = new Paint();
+            mDatePaint = createTextPaint(ContextCompat.getColor(
+                    WeatherWatchFace.this, R.color.date_text));
+            mDatePaint.setTextSize(28);
+
+            mForecastBitmap = ((BitmapDrawable)getResources().getDrawable(R.mipmap.ic_launcher)).getBitmap();
 
             mTime = new Time();
+            mCalendar = Calendar.getInstance();
         }
 
         @Override
@@ -192,7 +223,11 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             float textSize = resources.getDimension(isRound
                     ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
 
-            mTextPaint.setTextSize(textSize);
+            mTimePaint.setTextSize(textSize);
+
+            mCenterXTimeOffset = mTimePaint.measureText(TIME_STRING) / 2;
+
+            mCenterXDateOffset = mDatePaint.measureText(DATE_STRING) / 2;
         }
 
         @Override
@@ -213,7 +248,7 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
-                    mTextPaint.setAntiAlias(!inAmbientMode);
+                    mTimePaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -256,12 +291,36 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                 canvas.drawRect(0, 0, bounds.width(), bounds.height(), mBackgroundPaint);
             }
 
-            // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
-            mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            // compute center
+            float centerX = bounds.width() / 2f;
+            float centerY = bounds.height() / 2f;
+
+            float hourXOffset = centerX - mCenterXTimeOffset;
+            float hourYOffset = centerY - mCenterYTimeOffset - 40;
+
+            // draw hour
+            String hour = String.format(Locale.getDefault(),"%d:%02d", mTime.hour, mTime.minute);
+            canvas.drawText(hour, hourXOffset, hourYOffset, mTimePaint);
+
+            float dateXOffset = centerX - mCenterXDateOffset;
+            float dateYOffset = centerY - mCenterYTimeOffset;
+
+            SimpleDateFormat sdf = new SimpleDateFormat("E, MMM dd yyyy", Locale.getDefault());
+            String date = sdf.format(mCalendar.getTime());
+            canvas.drawText(date, dateXOffset, dateYOffset, mDatePaint);
+
+            canvas.drawLine(centerX - 40, centerY + 20, centerX + 40, centerY + 20, mTimePaint);
+
+            // Draw Date bitmap
+            float forecastBitmapXOffset = centerX - 50;
+            float forecastBitmapYOffset = centerY + 50;
+            if(mForecastBitmap != null && !isInAmbientMode()){
+                canvas.drawBitmap(
+                        mForecastBitmap,
+                        forecastBitmapXOffset,
+                        forecastBitmapYOffset,
+                        null);
+            }
         }
 
         /**
