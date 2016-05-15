@@ -8,10 +8,13 @@
 # Java class files
 *.class
 
+/app/build
+/wear/build
 # Generated files
 bin/
 gen/
 
+/.idea
 # Gradle files
 .gradle/
 build/
