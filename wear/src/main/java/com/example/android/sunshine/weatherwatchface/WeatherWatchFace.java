@@ -50,6 +50,9 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class WeatherWatchFace extends CanvasWatchFaceService {
+
+    private static final String TEMPERATURE_SPACING = " ";
+
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
@@ -92,9 +95,13 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
     private class Engine extends CanvasWatchFaceService.Engine {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
+
         Paint mBackgroundPaint;
         Paint mTimePaint;
         Paint mDatePaint;
+        Paint mMinTempPaint;
+        Paint mMaxTempPaint;
+
         boolean mAmbient;
         Time mTime;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
@@ -108,6 +115,8 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         static final String TIME_STRING = "00:00";
         static final String DATE_STRING = "Sun, JUN 15 2016";
 
+        String mMinTemp = TEMPERATURE_SPACING + "10";
+        String mMaxTemp = TEMPERATURE_SPACING + "20";
 
         int mTapCount;
 
@@ -117,6 +126,9 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
 
         float mCenterXDateOffset;
         float mCenterYDateOffset;
+
+        float mMaxTempWidth;
+        float mTempTextHalfHeight;
 
         Bitmap mForecastBitmap;
 
@@ -144,7 +156,7 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(ContextCompat.getColor(
-                    WeatherWatchFace.this, R.color.blue));
+                    WeatherWatchFace.this, R.color.background2));
 
             mTimePaint = new Paint();
             mTimePaint = createTextPaint(ContextCompat.getColor(
@@ -155,7 +167,13 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                     WeatherWatchFace.this, R.color.date_text));
             mDatePaint.setTextSize(28);
 
-            mForecastBitmap = ((BitmapDrawable)getResources().getDrawable(R.mipmap.ic_launcher)).getBitmap();
+            mForecastBitmap = ((BitmapDrawable) getResources().getDrawable(R.mipmap.ic_launcher)).getBitmap();
+
+            mMaxTempPaint = createTextPaint(ContextCompat.getColor(WeatherWatchFace.this, R.color.digital_text));
+            mMaxTempPaint.setTextSize(38);
+
+            mMinTempPaint = createTextPaint(ContextCompat.getColor(WeatherWatchFace.this, R.color.digital_text_transparent));
+            mMinTempPaint.setTextSize(38);
 
             mTime = new Time();
             mCalendar = Calendar.getInstance();
@@ -298,8 +316,9 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             float hourXOffset = centerX - mCenterXTimeOffset;
             float hourYOffset = centerY - mCenterYTimeOffset - 40;
 
+            mTime.setToNow();
             // draw hour
-            String hour = String.format(Locale.getDefault(),"%d:%02d", mTime.hour, mTime.minute);
+            String hour = String.format(Locale.getDefault(), "%d:%02d", mTime.hour, mTime.minute);
             canvas.drawText(hour, hourXOffset, hourYOffset, mTimePaint);
 
             float dateXOffset = centerX - mCenterXDateOffset;
@@ -312,14 +331,37 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             canvas.drawLine(centerX - 40, centerY + 20, centerX + 40, centerY + 20, mTimePaint);
 
             // Draw Date bitmap
-            float forecastBitmapXOffset = centerX - 50;
+            float forecastBitmapXOffset = centerX - 100;
             float forecastBitmapYOffset = centerY + 50;
-            if(mForecastBitmap != null && !isInAmbientMode()){
+
+            if (mForecastBitmap != null && !isInAmbientMode()) {
                 canvas.drawBitmap(
                         mForecastBitmap,
                         forecastBitmapXOffset,
                         forecastBitmapYOffset,
                         null);
+            }
+
+            float minTempTextWidth = mMinTempPaint.measureText(mMinTemp);
+            mMaxTempWidth = mMaxTempPaint.measureText(mMaxTemp);
+
+            // Draw max temp
+            if (mMaxTemp != null && !isInAmbientMode()) {
+                canvas.drawText(
+                        mMaxTemp,
+                        forecastBitmapXOffset + mForecastBitmap.getWidth(),
+                        forecastBitmapYOffset + mForecastBitmap.getHeight() / 2f + mTempTextHalfHeight,
+                        mMaxTempPaint
+                );
+            }
+
+            if (mMinTemp != null && !isInAmbientMode()) {
+                canvas.drawText(
+                        mMinTemp,
+                        forecastBitmapXOffset + mForecastBitmap.getWidth() + mMaxTempWidth,
+                        forecastBitmapYOffset + mForecastBitmap.getHeight() / 2f + mTempTextHalfHeight,
+                        mMinTempPaint
+                );
             }
         }
 
