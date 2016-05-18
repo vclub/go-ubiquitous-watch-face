@@ -123,6 +123,7 @@ public class WatchWeatherService extends WearableListenerService
     }
 
     public static final String WATCH_WEATHER_MSG_PATH = "/watch/data/weather";
+    public static final String WATCH_WEATHER_READY = "ready";
 
     private void sendWeatherToWatch(final byte[] message) {
 
