@@ -185,6 +185,11 @@
             android:name=".gcm.RegistrationIntentService"
             android:exported="false">
         </service>
+        <service
+            android:name=".gcm.WatchWeatherService"
+            android:enabled="true"
+            android:exported="true">
+        </service>
     </application>
 
 </manifest>

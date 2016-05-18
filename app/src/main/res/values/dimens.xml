@@ -23,6 +23,7 @@
 
     <!-- Icon Sizes -->
     <dimen name="today_icon">96dp</dimen>
+    <dimen name="watch_today_icon">96dp</dimen>
     <dimen name="list_icon">40dp</dimen>
 
     <!-- Text Sizes - We are using DP here rather than SP because these are already large
