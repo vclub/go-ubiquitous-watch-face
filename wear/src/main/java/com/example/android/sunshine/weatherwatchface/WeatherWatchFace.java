@@ -22,6 +22,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -37,13 +38,21 @@ import android.support.v4.content.ContextCompat;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.MessageApi;
+import com.google.android.gms.wearable.MessageEvent;
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.NodeApi;
 import com.google.android.gms.wearable.Wearable;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -56,6 +65,9 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class WeatherWatchFace extends CanvasWatchFaceService {
+
+    public static final String WATCH_WEATHER_MSG_PATH = "/watch/data/weather";
+    public static final String WATCH_WEATHER_READY = "ready";
 
     private static final String TEMPERATURE_SPACING = " ";
 
@@ -98,7 +110,7 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+    private class Engine extends CanvasWatchFaceService.Engine implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, NodeApi.NodeListener, MessageApi.MessageListener {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
 
@@ -108,7 +120,9 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         Paint mMinTempPaint;
         Paint mMaxTempPaint;
 
+        boolean mSwitchedToThisWatchFace;
         boolean mAmbient;
+
         Time mTime;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
@@ -121,8 +135,8 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         static final String TIME_STRING = "00:00";
         static final String DATE_STRING = "Sun, JUN 15 2016";
 
-        String mMinTemp = TEMPERATURE_SPACING + "10";
-        String mMaxTemp = TEMPERATURE_SPACING + "20";
+        String mMinTemp = TEMPERATURE_SPACING + "0°";
+        String mMaxTemp = TEMPERATURE_SPACING + "0°";
 
         int mTapCount;
 
@@ -131,16 +145,19 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         float mCenterYTimeOffset;
 
         float mCenterXDateOffset;
-        float mCenterYDateOffset;
 
         float mMaxTempWidth;
-        float mTempTextHalfHeight;
 
         Bitmap mForecastBitmap;
+        float mCenterXForecastOffset;
+        float mCenterYForecastOffset;
 
         float mXOffset;
         float mYOffset;
 
+        float mTempTextHalfHeight;
+        float mForecastBitmapHalfHeight;
+        int mForecastBitmapWidth;
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
          * disable anti-aliasing in ambient mode.
@@ -162,6 +179,8 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             Resources resources = WeatherWatchFace.this.getResources();
             mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
+            mCenterYForecastOffset = resources.getDimension(R.dimen.forecast_offset);
+
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(ContextCompat.getColor(
                     WeatherWatchFace.this, R.color.background2));
@@ -177,6 +196,9 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
 
             mForecastBitmap = ((BitmapDrawable) getResources().getDrawable(R.mipmap.ic_launcher)).getBitmap();
 
+            mForecastBitmapWidth = mForecastBitmap.getWidth();
+            mForecastBitmapHalfHeight = mForecastBitmap.getHeight() / 2f;
+
             mMaxTempPaint = createTextPaint(ContextCompat.getColor(WeatherWatchFace.this, R.color.digital_text));
             mMaxTempPaint.setTextSize(38);
 
@@ -191,6 +213,8 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                     .addOnConnectionFailedListener(this)
                     .addApi(Wearable.API)
                     .build();
+
+            mSwitchedToThisWatchFace = true;
         }
 
         @Override
@@ -217,8 +241,16 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                 // Update time zone in case it changed while we weren't visible.
                 mTime.clear(TimeZone.getDefault().getID());
                 mTime.setToNow();
+                Log.d(TAG, "onVisibilityChanged: try to connect google client");
+                mGoogleApiClient.connect();
             } else {
                 unregisterReceiver();
+
+                if(mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+                    Wearable.NodeApi.removeListener(mGoogleApiClient, this);
+                    Wearable.MessageApi.removeListener(mGoogleApiClient, this);
+                    mGoogleApiClient.disconnect();
+                }
             }
 
             // Whether the timer should be running depends on whether we're visible (as well as
@@ -342,11 +374,13 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
             String date = sdf.format(mCalendar.getTime());
             canvas.drawText(date, dateXOffset, dateYOffset, mDatePaint);
 
-            canvas.drawLine(centerX - 40, centerY + 20, centerX + 40, centerY + 20, mTimePaint);
+            if (mForecastBitmap != null && !isInAmbientMode()) {
+                canvas.drawLine(centerX - 40, centerY + 20, centerX + 40, centerY + 20, mTimePaint);
+            }
 
             // Draw Date bitmap
-            float forecastBitmapXOffset = centerX - 100;
-            float forecastBitmapYOffset = centerY + 50;
+            float forecastBitmapXOffset = centerX - mCenterXForecastOffset - 100;
+            float forecastBitmapYOffset = centerY + mCenterYForecastOffset + 20;
 
             if (mForecastBitmap != null && !isInAmbientMode()) {
                 canvas.drawBitmap(
@@ -356,26 +390,23 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
                         null);
             }
 
-            float minTempTextWidth = mMinTempPaint.measureText(mMinTemp);
             mMaxTempWidth = mMaxTempPaint.measureText(mMaxTemp);
 
             // Draw max temp
             if (mMaxTemp != null && !isInAmbientMode()) {
                 canvas.drawText(
                         mMaxTemp,
-                        forecastBitmapXOffset + mForecastBitmap.getWidth(),
-                        forecastBitmapYOffset + mForecastBitmap.getHeight() / 2f + mTempTextHalfHeight,
-                        mMaxTempPaint
-                );
+                        forecastBitmapXOffset + mForecastBitmapWidth,
+                        forecastBitmapYOffset + mForecastBitmapHalfHeight - mTempTextHalfHeight,
+                        mMaxTempPaint);
             }
 
             if (mMinTemp != null && !isInAmbientMode()) {
                 canvas.drawText(
                         mMinTemp,
-                        forecastBitmapXOffset + mForecastBitmap.getWidth() + mMaxTempWidth,
-                        forecastBitmapYOffset + mForecastBitmap.getHeight() / 2f + mTempTextHalfHeight,
-                        mMinTempPaint
-                );
+                        forecastBitmapXOffset + mForecastBitmapWidth + mMaxTempWidth,
+                        forecastBitmapYOffset + mForecastBitmapHalfHeight + mTempTextHalfHeight,
+                        mMinTempPaint);
             }
         }
 
@@ -414,16 +445,103 @@ public class WeatherWatchFace extends CanvasWatchFaceService {
         @Override
         public void onConnected(@Nullable Bundle bundle) {
 
+            Log.d(TAG, "onConnected: ");
+
+            Wearable.NodeApi.addListener(mGoogleApiClient, this);
+            Wearable.MessageApi.addListener(mGoogleApiClient, this);
+
+            if(mSwitchedToThisWatchFace) {
+                sendReadyMessageToPhone();
+                mSwitchedToThisWatchFace = false;
+            }
         }
 
         @Override
         public void onConnectionSuspended(int i) {
-
+            Wearable.NodeApi.removeListener(mGoogleApiClient, this);
+            Wearable.MessageApi.removeListener(mGoogleApiClient, this);
         }
 
         @Override
         public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+            Log.d(TAG, "onConnectionFailed: ");
+            Wearable.NodeApi.removeListener(mGoogleApiClient, this);
+            Wearable.MessageApi.removeListener(mGoogleApiClient, this);
+        }
 
+        @Override
+        public void onPeerConnected(Node node) {
+            sendReadyMessageToPhone();
+        }
+
+        private void sendReadyMessageToPhone(){
+            Log.d(TAG, "sendReadyMessageToPhone: ");
+            if(mGoogleApiClient.isConnected()) {
+                new Thread(){
+                    @Override
+                    public void run() {
+                        NodeApi.GetConnectedNodesResult nodesList =
+                                Wearable.NodeApi.getConnectedNodes(mGoogleApiClient).await();
+
+                        for(Node node : nodesList.getNodes()){
+                            Wearable.MessageApi.sendMessage(
+                                    mGoogleApiClient,
+                                    node.getId(),
+                                    WATCH_WEATHER_MSG_PATH,
+                                    WATCH_WEATHER_READY.getBytes()).await();
+                        }
+                    }
+                }.start();
+            }
+        }
+
+        @Override
+        public void onPeerDisconnected(Node node) {
+
+        }
+
+        private static final String TAG = "Engine";
+
+        @Override
+        public void onMessageReceived(MessageEvent messageEvent) {
+            Log.d(TAG, "onMessageReceived: ");
+            if (messageEvent.getPath().equals(WATCH_WEATHER_MSG_PATH)){
+                try{
+                    byte[][] byteArrayMsgHolder = (byte[][])deserialize(messageEvent.getData());
+
+                    mForecastBitmap = BitmapFactory.decodeByteArray(
+                            byteArrayMsgHolder[0],
+                            0,
+                            byteArrayMsgHolder[0].length
+                    );
+
+                    mMinTemp = new String(byteArrayMsgHolder[1]);
+                    mMaxTemp = new String(byteArrayMsgHolder[2]);
+
+                    float minTempTextWidth = mMinTempPaint.measureText(mMinTemp);
+                    mMaxTempWidth = mMaxTempPaint.measureText(mMaxTemp);
+                    float totalTempTextWidth = minTempTextWidth + mMaxTempWidth;
+
+                    mForecastBitmapWidth = mForecastBitmap.getWidth();
+                    mCenterXForecastOffset = (mForecastBitmapWidth + totalTempTextWidth) / 2f;
+
+                    mForecastBitmapHalfHeight = mForecastBitmap.getHeight() / 2f;
+
+                    Rect bonds = new Rect();
+                    mMaxTempPaint.getTextBounds(mMaxTemp, 0, mMaxTemp.length(), bonds);
+                    mTempTextHalfHeight = bonds.height() / 2f;
+
+                    invalidate();
+                }catch (IOException | ClassNotFoundException e){
+                    Log.e(TAG, Log.getStackTraceString(e) );
+                }
+            }
+        }
+
+        public Object deserialize(byte[] bytes) throws IOException, ClassNotFoundException {
+            ByteArrayInputStream b = new ByteArrayInputStream(bytes);
+            ObjectInputStream o = new ObjectInputStream(b);
+            return o.readObject();
         }
     }
 }
